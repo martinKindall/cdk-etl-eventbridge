@@ -9,6 +9,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as events_target from 'aws-cdk-lib/aws-events-targets';
 import { Construct } from 'constructs';
 
 export class EtlPatternsStack extends Stack {
@@ -34,7 +36,10 @@ export class EtlPatternsStack extends Stack {
     });
 
     this.fargateSetup();
-    this.lambdasSetup();
+    this.lambdaExtractSetup();
+    this.lambdaTransformSetup();
+    this.lambdaLoadSetup();
+    this.lambdaObserverSetup();
   }
 
   private createResources() {
@@ -81,7 +86,7 @@ export class EtlPatternsStack extends Stack {
     });
   }
 
-  private lambdasSetup() {
+  private lambdaExtractSetup() {
     const extractLambda = new lambda.Function(this, 'extractLambdaHandler', {
       runtime: lambda.Runtime.NODEJS_12_X,
       code: lambda.Code.fromAsset('lambda-fns/extract'),
@@ -123,5 +128,77 @@ export class EtlPatternsStack extends Stack {
     });
 
     extractLambda.addToRolePolicy(taskExecutionRolePolicyStatement);
+  }
+
+  private lambdaTransformSetup() {
+    const transformLambda = new lambda.Function(this, 'TransformLambdaHandler', {
+      runtime: lambda.Runtime.NODEJS_12_X,
+      code: lambda.Code.fromAsset('lambda-fns/transform'),
+      handler: 'transform.handler',
+      reservedConcurrentExecutions: this.LAMBDA_THROTTLE_SIZE,
+      timeout: Duration.seconds(3)
+    });
+
+    transformLambda.addToRolePolicy(this.eventBridgePutPolicy);
+
+    const transformRule = new events.Rule(this, 'transformRule', {
+      description: 'Data extracted from S3, needs to be transformed',
+      eventPattern: {
+        source: ['cdkpatterns.the-eventbridge-etl'],
+        detailType: ['s3RecordExtraction'],
+        detail: {
+          status: ['extracted']
+        }
+      }
+    });
+
+    transformRule.addTarget(new events_target.LambdaFunction(transformLambda));
+  }
+
+  private lambdaLoadSetup() {
+    const loadLambda = new lambda.Function(this, 'LoadLambdaHandler', {
+      runtime: lambda.Runtime.NODEJS_12_X,
+      code: lambda.Code.fromAsset('lambda-fns/load'),
+      handler: 'load.handler',
+      timeout: Duration.seconds(3),
+      reservedConcurrentExecutions: this.LAMBDA_THROTTLE_SIZE,
+      environment: {
+        TABLE_NAME: this.table.tableName
+      }
+    });
+
+    loadLambda.addToRolePolicy(this.eventBridgePutPolicy);
+    this.table.grantReadWriteData(loadLambda);
+
+    const loadRule = new events.Rule(this, 'loadRule', {
+      description: 'Data transformed, Needs loaded into dynamoDB',
+      eventPattern: {
+        source: ['cdkpatterns.the-eventbridge-etl'],
+        detailType: ['transform'],
+        detail: {
+          status: ['transformed']
+        }
+      }
+    });
+
+    loadRule.addTarget(new events_target.LambdaFunction(loadLambda));
+  }
+
+  private lambdaObserverSetup() {
+    const observeLambda = new lambda.Function(this, 'ObserverLambdaHandler', {
+      runtime: lambda.Runtime.NODEJS_12_X,
+      code: lambda.Code.fromAsset('lambda-fns/observe'),
+      handler: 'observe.handler',
+      timeout: Duration.seconds(3)
+    });
+
+    const observerRule = new events.Rule(this, 'observeRule', {
+      description: 'all events are caught here and logged centrally',
+      eventPattern: {
+        source: ['cdkpatterns.the-eventbridge-etl']
+      }
+    });
+
+    observerRule.addTarget(new events_target.LambdaFunction(observeLambda));
   }
 }
