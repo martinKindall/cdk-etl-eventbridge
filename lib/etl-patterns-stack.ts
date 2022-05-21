@@ -15,6 +15,8 @@ export class EtlPatternsStack extends Stack {
   private queue: sqs.Queue;
   private table: dynamodb.Table;
   private bucket: s3.Bucket;
+  private cluster: ecs.Cluster;
+  private taskDefinition: ecs.TaskDefinition;
 
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -53,15 +55,24 @@ export class EtlPatternsStack extends Stack {
       logRetention: logs.RetentionDays.ONE_WEEK
     });
 
-    const cluster = new ecs.Cluster(this, 'EcsCluster', {vpc});
+    this.cluster = new ecs.Cluster(this, 'EcsCluster', {vpc});
 
-    const taskDefinition = new ecs.FargateTaskDefinition(this, 'FargateTaskDefinition', {
+    this.taskDefinition = new ecs.FargateTaskDefinition(this, 'FargateTaskDefinition', {
       memoryLimitMiB: 512,
       cpu: 256
     });
 
-    taskDefinition.addToTaskRolePolicy(this.eventBridgePutPolicy);
+    this.taskDefinition.addToTaskRolePolicy(this.eventBridgePutPolicy);
 
-    this.bucket.grantRead(taskDefinition.taskRole);
+    this.bucket.grantRead(this.taskDefinition.taskRole);
+
+    const container = this.taskDefinition.addContainer('AppContainer', {
+      image: ecs.ContainerImage.fromAsset('container/dataExtractionTask'),
+      logging,
+      environment: {
+        'S3_BUCKET_NAME': this.bucket.bucketName,
+        'S3_OBJECT_KEY': ''
+      }
+    });
   }
 }
