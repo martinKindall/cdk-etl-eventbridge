@@ -1,9 +1,24 @@
-# Welcome to your CDK TypeScript project
+# CDK Patterns - ETL Eventbridge
 
-You should explore the contents of this project. It demonstrates a CDK app with an instance of a stack (`EtlPatternsStack`)
-which contains an Amazon SQS queue that is subscribed to an Amazon SNS topic.
+The original proyect https://github.com/cdk-patterns/serverless/blob/main/the-eventbridge-etl/README.md.
+I basically rewrited the project using the CDK 2.0.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+## Deploy
+
+Make sure to have the Docker daemon running, because this project builds a Docker image and pushes it to __ECR__.
+
+```bash
+npm run build
+cdk deploy
+```
+
+## Usage
+
+To trigger the ETL pipeline, upload the example .csv in the __data\_example__ folder.
+
+## Debug
+
+Every lambda writes logs to CloudWatch. The Observer lambda writes every event sent via Eventbridge to Cloudwatch too.
 
 ## Useful commands
 
